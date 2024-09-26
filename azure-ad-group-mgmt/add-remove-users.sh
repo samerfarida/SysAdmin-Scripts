@@ -69,6 +69,7 @@ do
             # Add the user to the group  
             az ad group member add --group "$group" --member-id "$user"  
               
+            # shellcheck disable=SC2181
             if [ $? -eq 0 ]; then  
                 echo "Added $email with ID $user to $groupname."  
             else  
@@ -83,6 +84,7 @@ do
             # Remove the user from the group  
             az ad group member remove --group "$group" --member-id "$user"  
               
+            # shellcheck disable=SC2181
             if [ $? -eq 0 ]; then  
                 echo "Removed $email with ID $user from $groupname."  
             else  
