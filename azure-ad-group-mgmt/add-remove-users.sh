@@ -2,7 +2,7 @@
   
 show_usage() {  
     echo "Usage: ./scriptName.sh --groupname <groupname> --filepath <filepath> --add || --remove"  
-    exit 1  
+    exit 0  
 }  
   
 if [[ "$#" -lt 3 ]]; then  
