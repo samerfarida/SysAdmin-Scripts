@@ -1,35 +1,45 @@
 # Folder ACL & Share Permission Audit Script
 
-`FolderAclAudit.ps1` is a PowerShell-based auditing tool designed to
-extract **NTFS folder permissions** and **SMB share permissions** from a
-file server. It generates a detailed CSV report including access control
-entries, inheritance details, folder metadata, and share-level rights
---- all in one place.
+`FolderAclAudit.ps1` is a PowerShell auditing tool that extracts **NTFS
+folder permissions** and **SMB share permissions** with optional
+**depth‑limited scanning**.\
+It outputs a clean CSV that includes IDs, inheritance flags, permission
+levels, share access, and full ACL detail --- ideal for audits,
+migrations, least‑privilege reviews, and security assessments.
 
-This script is ideal for security audits, least-privilege reviews,
-migration prep, and identifying permission drift across large directory
-structures.
+------------------------------------------------------------------------
 
-## Features
+## 🔥 Key Features
 
--   Audits **folders only** (no files) for faster processing.\
--   Collects **NTFS ACLs** including explicit/inherited ACEs.\
--   Pulls **SMB share permissions** (Full / Change / Read).\
--   Adds a unique **ID column** for easy cross-referencing.\
--   Includes useful metadata:
-    -   Parent folder\
-    -   Folder depth\
-    -   Permission level (Full / Modify / Read / Other)\
-    -   ACE order\
-    -   Timestamps\
--   Supports UNC paths (`\\Server\\Share`) or local paths.\
--   Fully compatible with **DFS namespaces**.\
--   Logs the entire audit start-to-finish.\
--   Exports results to Excel-friendly CSV files.
+-   **Folder-only auditing** (ignores files for speed & clarity)
+-   **Depth control via `MaxDepth`**
+    -   `0` = root folder only\
+    -   `1` = root + children\
+    -   `2` = root + children + grandchildren\
+    -   *(Press ENTER at prompt to scan unlimited depth)*
+-   **Streaming CSV output** (no large memory usage)
+-   **NTFS ACL collection** including:
+    -   Identity (user/group)
+    -   Raw NTFS rights
+    -   Simplified PermissionLevel (FullControl / Modify / Read / Other)
+    -   Explicit vs Inherited permissions
+    -   ACE order
+-   **Share permission collection**
+    -   Share name
+    -   Server name
+    -   Share local path
+    -   Flattened summary of share rights
+-   **Rich folder metadata**
+    -   Parent folder
+    -   Folder depth
+    -   Owner
+    -   Timestamps
+-   **Logging + error output**\
+    Transcript log + `.errors.csv` for any failed folder lookups.
 
-## Output Columns
+------------------------------------------------------------------------
 
-The generated CSV includes the following columns:
+## 📄 CSV Output Columns
 
     ID
     Path
@@ -53,55 +63,115 @@ The generated CSV includes the following columns:
     LastWriteTime
     CreationTime
 
-Every ACE (Access Control Entry) on every folder becomes **one row** in
-the report.
+Each **ACE** (Access Control Entry) becomes **one row**.\
+A folder with 10 AD groups = 10 rows in the CSV.
 
-## Prerequisites
+------------------------------------------------------------------------
 
--   Windows workstation or server\
--   PowerShell 5+\
--   Network access to the file server\
--   Read permissions on the target folders\
--   For remote share lookups: WinRM / CIM must be allowed
+## 🚀 How to Use
 
-## Usage
-
-Open a PowerShell prompt and run:
+### **Basic Example**
 
 ``` powershell
-.\FolderAclAudit.ps1 -RootPath "\\FileServer01\Finance$"
+.\FolderAclAudit.ps1 -RootPath "\\FS01\TrainingFolder"
 ```
 
-You may optionally specify custom output paths:
+When prompted for **MaxDepth**, press:
+
+-   **ENTER** → unlimited depth\
+-   **0** → only the root\
+-   **1** → root + children\
+-   **2** → root + children + grandchildren\
+-   etc.
+
+### **Custom Output Paths**
 
 ``` powershell
 .\FolderAclAudit.ps1 `
-  -RootPath "\\FileServer01\DeptShares" `
-  -OutputCsvPath "C:\Audit\DeptShares_Audit.csv" `
-  -LogFilePath "C:\Audit\DeptShares_Audit.log"
+  -RootPath "\\FS01\TrainingFolder" `
+  -OutputCsvPath "C:\Audit\Training_ACL.csv" `
+  -LogFilePath "C:\Audit\Training_Log.txt"
 ```
 
-If no output paths are provided, the script writes both files to the
-**current directory**.
+### **Run without browsing the server**
 
-## DFS Note
+UNC and local paths work:
 
-The script works with DFS paths.\
-For multi-target DFS namespaces, audit each backend UNC path
-individually to detect permission drift.
+-   `\\FS01\Share`\
+-   `\\Domain\DFS\Namespace`\
+-   `C:\LocalPath`
 
-## Example Output (Single Folder Snippet)
+DFS works --- the script audits whichever backend target the path
+resolves to.
 
-    ID: 1
-    Path: \\FS01\Finance\Budgets
-    Identity: DOMAIN\FileAdmins
-    FileSystemRights: FullControl
-    PermissionLevel: FullControl
-    ACEType: Explicit
-    ShareAccessSummary: DOMAIN\FileAdmins:Allow:Full; Everyone:Allow:Read
-    Owner: DOMAIN\FileAdmins
-    ...
+------------------------------------------------------------------------
 
-## License
+## 📌 Depth Behavior Explained
 
-This script is provided as-is. Modify and extend freely.
+If your root is:
+
+    \\FS01\TrainingFolder\
+
+And you set:
+
+### **MaxDepth = 1**
+
+The script scans:
+
+    TrainingFolder\         (depth 0)
+    TrainingFolder\Dept1\   (depth 1)
+    TrainingFolder\Dept2\   (depth 1)
+
+It **does NOT** scan deeper subfolders.
+
+### **MaxDepth = Unlimited (ENTER)**
+
+It scans every folder under the root.
+
+------------------------------------------------------------------------
+
+## ⚙️ Requirements
+
+-   Windows 10/11 or Windows Server\
+-   PowerShell 5+\
+-   Read access to target folders\
+-   Share-permission retrieval requires remote CIM access if scanning
+    UNC paths
+
+------------------------------------------------------------------------
+
+## 🧪 Example CSV Snippet (based on typical GUI Security tab)
+
+    ID,Path,Identity,FileSystemRights,PermissionLevel,ACEType
+    1,\\FS01\Training\Videos,LTS.VIDEO.STAFF,"Modify, ReadAndExecute",Modify,Explicit
+    2,\\FS01\Training\Videos,LTS.CAT.DOCS,"ReadAndExecute",Read,Explicit
+    3,\\FS01\Training\Videos,MEDIA01.ADMINS.VIDEO,"FullControl",FullControl,Explicit
+
+This matches what you see in the Windows Security tab but **adds share
+perms and metadata GUI never shows**.
+
+------------------------------------------------------------------------
+
+## 📝 Logging & Error Handling
+
+-   Full transcript written to the log file you specify\
+-   Any unreadable folders produce entries in:\
+    **`<csvfilename>.errors.csv`**
+
+The audit **never stops** due to permission failures --- it logs and
+continues.
+
+------------------------------------------------------------------------
+
+## 📄 License
+
+Free to use, modify, and integrate into your environment.
+
+------------------------------------------------------------------------
+
+If you want a version with: - Effective permissions\
+- Group nesting expansion\
+- Risk scoring\
+- Or HTML/Excel formatted reports
+
+...I can generate those too.
