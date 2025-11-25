@@ -1,10 +1,3 @@
-# PSScriptAnalyzer suppressions for interactive script requirements
-# Suppress PSAvoidUsingWriteHost - Write-Host is needed for interactive prompts and colored output
-# Suppress PSUseApprovedVerbs - Process-Folder is an internal helper function
-# Suppress PSAvoidOverwritingBuiltInCmdlets - Write-Log is a common pattern and our implementation is appropriate
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for interactive prompts and colored output in this user-facing script')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification='Process-Folder is an internal helper function with clear naming')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification='Write-Log is a common pattern and our implementation is appropriate for this script')]
 param(
     [Parameter(Mandatory = $false,
                HelpMessage = "Root path to audit (e.g. \\fileserver\\share or C:\\Data)")]
@@ -268,7 +261,6 @@ function Get-FolderDepth {
 }
 
 # Helper: process a single folder (get ACL, emit rows)
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification='Process-Folder is an internal helper function')]
 function Process-Folder {
     param(
         [System.IO.DirectoryInfo]$Folder,
