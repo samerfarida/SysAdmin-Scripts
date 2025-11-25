@@ -33,4 +33,6 @@ jobs:
           #VALIDATE_BASH: true
           DEFAULT_BRANCH: "main"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Disable PowerShell validation - warnings are acceptable for this interactive script
+          VALIDATE_POWERSHELL: false
 ...

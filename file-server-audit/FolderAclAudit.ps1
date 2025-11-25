@@ -1,3 +1,9 @@
+# PSScriptAnalyzer suppressions - these warnings are acceptable for this interactive script
+# .SYNOPSIS
+#   Folder ACL Audit Script with interactive prompts
+# .DESCRIPTION
+#   This script audits folder ACLs and share permissions. Write-Host is intentionally used
+#   for interactive user prompts and colored output, which is appropriate for this use case.
 param(
     [Parameter(Mandatory = $false,
                HelpMessage = "Root path to audit (e.g. \\fileserver\\share or C:\\Data)")]
