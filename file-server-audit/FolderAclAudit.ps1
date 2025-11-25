@@ -1,3 +1,10 @@
+# PSScriptAnalyzer suppressions for interactive script requirements
+# Suppress PSAvoidUsingWriteHost - Write-Host is needed for interactive prompts and colored output
+# Suppress PSUseApprovedVerbs - Process-Folder is an internal helper function
+# Suppress PSAvoidOverwritingBuiltInCmdlets - Write-Log is a common pattern and our implementation is appropriate
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for interactive prompts and colored output in this user-facing script')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification='Process-Folder is an internal helper function with clear naming')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification='Write-Log is a common pattern and our implementation is appropriate for this script')]
 param(
     [Parameter(Mandatory = $false,
                HelpMessage = "Root path to audit (e.g. \\fileserver\\share or C:\\Data)")]
@@ -25,12 +32,12 @@ if ([string]::IsNullOrWhiteSpace($RootPath)) {
     Write-Host "Please provide the required information:" -ForegroundColor Yellow
     Write-Host ""
     $RootPath = Read-Host "Enter root path to audit (e.g. \\fileserver\share or C:\Data)"
-    
+
     if ([string]::IsNullOrWhiteSpace($RootPath)) {
         Write-Error "Root path is required. Script cannot continue without a valid path."
         exit 1
     }
-    
+
     Write-Host "Root path set to: $RootPath" -ForegroundColor Green
 }
 
@@ -44,7 +51,7 @@ if ([string]::IsNullOrWhiteSpace($MaxDepth)) {
     Write-Host "  - Enter any positive number for specific depth limit" -ForegroundColor Gray
     Write-Host ""
     $MaxDepth = Read-Host "Enter Max Depth (or press ENTER for unlimited)"
-    
+
     if ([string]::IsNullOrWhiteSpace($MaxDepth)) {
         Write-Host "Max depth set to: Unlimited (all subfolders)" -ForegroundColor Green
     } else {
@@ -92,6 +99,7 @@ try {
 
 $maxDepthDisplay = if ($MaxDepthInt -eq [int]::MaxValue) { "Unlimited" } else { $MaxDepthInt }
 
+# Write-Host is intentionally used for user-facing output
 Write-Host "Starting FOLDER-ONLY ACL audit (NTFS + Share)..."
 Write-Host "Root path     : $RootPath"
 Write-Host "Max depth     : $maxDepthDisplay"
@@ -260,6 +268,7 @@ function Get-FolderDepth {
 }
 
 # Helper: process a single folder (get ACL, emit rows)
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification='Process-Folder is an internal helper function')]
 function Process-Folder {
     param(
         [System.IO.DirectoryInfo]$Folder,
