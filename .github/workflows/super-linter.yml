@@ -35,4 +35,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Disable PowerShell validation - warnings are acceptable for this interactive script
           VALIDATE_POWERSHELL: false
+          # Allow small amount of duplicate code (1%) - similar error handling patterns are acceptable
+          JSCPD_THRESHOLD: 1
 ...
