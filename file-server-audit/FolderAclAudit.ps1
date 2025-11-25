@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true,
-               HelpMessage = "Root path to audit (e.g. \\fileserver\share or C:\Data)")]
+               HelpMessage = "Root path to audit (e.g. \\fileserver\\share or C:\\Data)")]
     [string]$RootPath,
 
     [Parameter(Mandatory = $false,
@@ -9,8 +9,36 @@ param(
 
     [Parameter(Mandatory = $false,
                HelpMessage = "Path to log file")]
-    [string]$LogFilePath = $(Join-Path -Path (Get-Location) -ChildPath ("FolderAclAudit_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date)))
+    [string]$LogFilePath = $(Join-Path -Path (Get-Location) -ChildPath ("FolderAclAudit_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date))),
+
+    [Parameter(Mandatory = $true,
+               HelpMessage = "Max depth: 0=root only, 1=root+children, 2=root+children+grandchildren, etc. Press ENTER for unlimited.")]
+    [string]$MaxDepth
 )
+
+# --- Normalize & validate MaxDepth ---
+
+[int]$MaxDepthInt = [int]::MaxValue
+
+if ([string]::IsNullOrWhiteSpace($MaxDepth)) {
+    # User hit ENTER -> unlimited depth
+    $MaxDepthInt = [int]::MaxValue
+} else {
+    $parsed = 0
+    if (-not [int]::TryParse($MaxDepth, [ref]$parsed)) {
+        Write-Error "MaxDepth must be a valid non-negative integer."
+        exit 1
+    }
+
+    if ($parsed -lt 0) {
+        Write-Warning "MaxDepth cannot be negative. Using 0 (root only)."
+        $MaxDepthInt = 0
+    } else {
+        $MaxDepthInt = $parsed
+    }
+}
+
+# --- Core script starts here ---
 
 # Ensure root path exists
 if (-not (Test-Path -LiteralPath $RootPath)) {
@@ -25,8 +53,11 @@ try {
     Write-Warning "Failed to start transcript logging: $($_.Exception.Message)"
 }
 
+$maxDepthDisplay = if ($MaxDepthInt -eq [int]::MaxValue) { "Unlimited" } else { $MaxDepthInt }
+
 Write-Host "Starting FOLDER-ONLY ACL audit (NTFS + Share)..."
 Write-Host "Root path     : $RootPath"
+Write-Host "Max depth     : $maxDepthDisplay"
 Write-Host "Output CSV    : $OutputCsvPath"
 Write-Host "Log file      : $LogFilePath"
 Write-Host "Start time    : $(Get-Date)"
@@ -79,7 +110,7 @@ function Get-ShareInfo {
     # UNC path: \\Server\Share\...
     if ($RootPath.StartsWith("\\")) {
         if ($RootPath -match "^\\\\([^\\]+)\\([^\\]+)") {
-            $server   = $matches[1]
+            $server    = $matches[1]
             $shareName = $matches[2]
 
             $shareProps.ShareServer = $server
@@ -136,7 +167,6 @@ function Get-ShareInfo {
     return [pscustomobject]$shareProps
 }
 
-$results = New-Object System.Collections.Generic.List[psobject]
 $errors  = New-Object System.Collections.Generic.List[psobject]
 
 # Normalize root path for depth calculations
@@ -150,56 +180,35 @@ if ($shareInfo.ShareName) {
     Write-Log "No matching share information could be resolved for root path '$RootPath'." "WARN"
 }
 
-# Get list of all FOLDERS, including the root itself
-Write-Log "Enumerating folders under '$RootPath'..."
+# Global counters & CSV state
+$idCounter = 0
+$script:CsvInitialized = $false
 
-$allFolders = @()
+# Helper: write one ACE row to CSV (streaming, header once)
+function Write-AceRow {
+    param(
+        [pscustomobject]$Row,
+        [string]$CsvPath
+    )
 
-try {
-    # Root folder
-    $rootItem = Get-Item -LiteralPath $RootPath -ErrorAction Stop
-    if (-not $rootItem.PSIsContainer) {
-        Write-Error "Root path '$RootPath' is not a folder."
-        exit 1
+    if (-not $script:CsvInitialized) {
+        $Row | Export-Csv -Path $CsvPath -NoTypeInformation -Encoding UTF8
+        $script:CsvInitialized = $true
+    } else {
+        $Row | Export-Csv -Path $CsvPath -NoTypeInformation -Encoding UTF8 -Append
     }
-    $allFolders += $rootItem
-
-    # Subfolders only
-    $children = Get-ChildItem -LiteralPath $RootPath -Directory -Recurse -Force -ErrorAction SilentlyContinue
-    $allFolders += $children
-} catch {
-    Write-Log "Failed to enumerate folders under '$RootPath': $($_.Exception.Message)" "ERROR"
 }
 
-$total = $allFolders.Count
-Write-Log "Total folders found: $total"
+# Helper: compute depth for a folder relative to root
+function Get-FolderDepth {
+    param(
+        [string]$FolderPath,
+        [string]$RootPath
+    )
 
-$index     = 0
-$idCounter = 0   # Global row ID
+    $normalizedFolder = $FolderPath.TrimEnd('\')
+    $normalizedRoot   = $RootPath.TrimEnd('\')
 
-foreach ($folder in $allFolders) {
-    $index++
-    $percent = [int](($index / [math]::Max($total,1)) * 100)
-
-    Write-Progress -Activity "Auditing folder ACLs" -Status $folder.FullName -PercentComplete $percent
-
-    try {
-        $acl = Get-Acl -LiteralPath $folder.FullName -ErrorAction Stop
-    } catch {
-        $errObj = [pscustomobject]@{
-            Path      = $folder.FullName
-            Error     = $_.Exception.Message
-            TimeStamp = Get-Date
-        }
-        $errors.Add($errObj) | Out-Null
-        Write-Log "Failed to get ACL for '$($folder.FullName)': $($_.Exception.Message)" "ERROR"
-        continue
-    }
-
-    # Calculate parent folder and depth (relative to root)
-    $parentFolder = Split-Path -LiteralPath $folder.FullName -Parent
-
-    $normalizedFolder = $folder.FullName.TrimEnd('\')
     $folderDepth = 0
     if ($normalizedFolder.Length -gt $normalizedRoot.Length -and
         $normalizedFolder.StartsWith($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -210,51 +219,104 @@ foreach ($folder in $allFolders) {
         }
     }
 
-    # Keep ACE order per folder
+    return $folderDepth
+}
+
+# Helper: process a single folder (get ACL, emit rows)
+function Process-Folder {
+    param(
+        [System.IO.DirectoryInfo]$Folder,
+        [int]$Depth,
+        [pscustomobject]$ShareInfo,
+        [string]$CsvPath,
+        [ref]$IdCounterRef,
+        [System.Collections.Generic.List[psobject]]$ErrorsList
+    )
+
+    Write-Progress -Activity "Auditing folder ACLs" -Status $Folder.FullName
+
+    try {
+        $acl = Get-Acl -LiteralPath $Folder.FullName -ErrorAction Stop
+    } catch {
+        $errObj = [pscustomobject]@{
+            Path      = $Folder.FullName
+            Error     = $_.Exception.Message
+            TimeStamp = Get-Date
+        }
+        $ErrorsList.Add($errObj) | Out-Null
+        Write-Log "Failed to get ACL for '$($Folder.FullName)': $($_.Exception.Message)" "ERROR"
+        return
+    }
+
+    $parentFolder = Split-Path -LiteralPath $Folder.FullName -Parent
     $aceOrder = 0
 
     foreach ($ace in $acl.Access) {
         $aceOrder++
-        $idCounter++
+        $IdCounterRef.Value++
 
         $permissionLevel = Get-PermissionLevel -Rights $ace.FileSystemRights
         $aceType         = if ($ace.IsInherited) { "Inherited" } else { "Explicit" }
 
-        $obj = [pscustomobject]@{
-            ID                = $idCounter
-            Path              = $folder.FullName
-            ItemType          = "Folder"
-            ParentFolder      = $parentFolder
-            FolderDepth       = $folderDepth
-            ShareServer       = $shareInfo.ShareServer
-            ShareName         = $shareInfo.ShareName
-            ShareLocalPath    = $shareInfo.ShareLocalPath
-            ShareAccessSummary= $shareInfo.ShareAccessSummary
-            ACEOrder          = $aceOrder
-            ACEType           = $aceType
-            Identity          = $ace.IdentityReference.Value
-            FileSystemRights  = $ace.FileSystemRights.ToString()
-            PermissionLevel   = $permissionLevel
-            AccessControlType = $ace.AccessControlType.ToString()   # Allow / Deny
-            InheritanceFlags  = $ace.InheritanceFlags.ToString()
-            PropagationFlags  = $ace.PropagationFlags.ToString()
-            IsInherited       = $ace.IsInherited
-            Owner             = $acl.Owner
-            LastWriteTime     = $folder.LastWriteTime
-            CreationTime      = $folder.CreationTime
+        $row = [pscustomobject]@{
+            ID                 = $IdCounterRef.Value
+            Path               = $Folder.FullName
+            ItemType           = "Folder"
+            ParentFolder       = $parentFolder
+            FolderDepth        = $Depth
+            ShareServer        = $ShareInfo.ShareServer
+            ShareName          = $ShareInfo.ShareName
+            ShareLocalPath     = $ShareInfo.ShareLocalPath
+            ShareAccessSummary = $ShareInfo.ShareAccessSummary
+            ACEOrder           = $aceOrder
+            ACEType            = $aceType
+            Identity           = $ace.IdentityReference.Value
+            FileSystemRights   = $ace.FileSystemRights.ToString()
+            PermissionLevel    = $permissionLevel
+            AccessControlType  = $ace.AccessControlType.ToString()
+            InheritanceFlags   = $ace.InheritanceFlags.ToString()
+            PropagationFlags   = $ace.PropagationFlags.ToString()
+            IsInherited        = $ace.IsInherited
+            Owner              = $acl.Owner
+            LastWriteTime      = $Folder.LastWriteTime
+            CreationTime       = $Folder.CreationTime
         }
-        $results.Add($obj) | Out-Null
+
+        Write-AceRow -Row $row -CsvPath $CsvPath
     }
 }
 
-Write-Log "Finished collecting ACLs. Exporting to CSV..."
+Write-Log "Enumerating and auditing folders under '$RootPath' with MaxDepth = $maxDepthDisplay ..."
 
+# Process root folder
 try {
-    $results | Export-Csv -Path $OutputCsvPath -NoTypeInformation -Encoding UTF8
-    Write-Log "ACL data exported to '$OutputCsvPath'"
+    $rootItem = Get-Item -LiteralPath $RootPath -ErrorAction Stop
+    if (-not $rootItem.PSIsContainer) {
+        Write-Error "Root path '$RootPath' is not a folder."
+        exit 1
+    }
 } catch {
-    Write-Log "Failed to export ACL data: $($_.Exception.Message)" "ERROR"
+    Write-Log "Failed to access root path '$RootPath': $($_.Exception.Message)" "ERROR"
+    exit 1
 }
+
+# Root depth is always 0
+Process-Folder -Folder $rootItem -Depth 0 -ShareInfo $shareInfo -CsvPath $OutputCsvPath -IdCounterRef ([ref]$idCounter) -ErrorsList $errors
+
+# If MaxDepthInt is 0, we stop at the root
+if ($MaxDepthInt -gt 0) {
+    # Stream all subfolders and filter by depth
+    Get-ChildItem -LiteralPath $RootPath -Directory -Recurse -Force -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $folderDepth = Get-FolderDepth -FolderPath $_.FullName -RootPath $RootPath
+
+            if ($folderDepth -le $MaxDepthInt) {
+                Process-Folder -Folder $_ -Depth $folderDepth -ShareInfo $shareInfo -CsvPath $OutputCsvPath -IdCounterRef ([ref]$idCounter) -ErrorsList $errors
+            }
+        }
+}
+
+Write-Log "Finished collecting ACLs. CSV written to '$OutputCsvPath'"
 
 if ($errors.Count -gt 0) {
     $errorCsvPath = [System.IO.Path]::ChangeExtension($OutputCsvPath, ".errors.csv")
@@ -269,6 +331,7 @@ if ($errors.Count -gt 0) {
 }
 
 Write-Host "End time      : $(Get-Date)"
+Write-Host "Total ACE rows: $idCounter"
 Write-Host "Audit complete."
 
 try {
