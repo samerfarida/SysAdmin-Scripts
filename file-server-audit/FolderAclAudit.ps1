@@ -285,7 +285,9 @@ function Process-Folder {
         return
     }
 
-    $parentFolder = Split-Path -LiteralPath $Folder.FullName -Parent
+    # Use -Path instead of -LiteralPath for PowerShell 5.1 compatibility
+    # -LiteralPath was added in PowerShell 6.0, but many users are on Windows PowerShell 5.1
+    $parentFolder = Split-Path -Path $Folder.FullName -Parent
     $aceOrder = 0
 
     foreach ($ace in $acl.Access) {
