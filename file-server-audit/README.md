@@ -12,11 +12,12 @@ migrations, least‑privilege reviews, and security assessments.
 ## 🔥 Key Features
 
 -   **Folder-only auditing** (ignores files for speed & clarity)
--   **Depth control via `MaxDepth`**
+-   **Depth control via `MaxDepth` parameter**
+    -   Omit parameter or use empty string = unlimited depth\
     -   `0` = root folder only\
     -   `1` = root + children\
     -   `2` = root + children + grandchildren\
-    -   *(Press ENTER at prompt to scan unlimited depth)*
+    -   Any positive integer for specific depth limit
 -   **Streaming CSV output** (no large memory usage)
 -   **NTFS ACL collection** including:
     -   Identity (user/group)
@@ -70,25 +71,48 @@ A folder with 10 AD groups = 10 rows in the CSV.
 
 ## 🚀 How to Use
 
-### **Basic Example**
+### **Interactive Mode (Recommended for First-Time Users)**
+
+Simply run the script without parameters:
+
+``` powershell
+.\FolderAclAudit.ps1
+```
+
+The script will prompt you for:
+1. **Root Path** - The folder path to audit (required)
+2. **Max Depth** - How deep to scan (press ENTER for unlimited)
+
+### **Command-Line Mode (All Parameters)**
 
 ``` powershell
 .\FolderAclAudit.ps1 -RootPath "\\FS01\TrainingFolder"
 ```
 
-When prompted for **MaxDepth**, press:
+By default, the script scans **all subfolders** (unlimited depth) when `-MaxDepth` is omitted.
 
--   **ENTER** → unlimited depth\
--   **0** → only the root\
--   **1** → root + children\
--   **2** → root + children + grandchildren\
--   etc.
+### **Limited Depth Examples**
+
+``` powershell
+# Scan root folder only
+.\FolderAclAudit.ps1 -RootPath "\\FS01\TrainingFolder" -MaxDepth "0"
+
+# Scan root + first level children
+.\FolderAclAudit.ps1 -RootPath "\\FS01\TrainingFolder" -MaxDepth "1"
+
+# Scan root + children + grandchildren
+.\FolderAclAudit.ps1 -RootPath "\\FS01\TrainingFolder" -MaxDepth "2"
+
+# Explicitly set unlimited depth (same as omitting -MaxDepth)
+.\FolderAclAudit.ps1 -RootPath "\\FS01\TrainingFolder" -MaxDepth ""
+```
 
 ### **Custom Output Paths**
 
 ``` powershell
 .\FolderAclAudit.ps1 `
   -RootPath "\\FS01\TrainingFolder" `
+  -MaxDepth "2" `
   -OutputCsvPath "C:\Audit\Training_ACL.csv" `
   -LogFilePath "C:\Audit\Training_Log.txt"
 ```
@@ -124,19 +148,19 @@ The script scans:
 
 It **does NOT** scan deeper subfolders.
 
-### **MaxDepth = Unlimited (ENTER)**
+### **MaxDepth = Unlimited (Omitted or Empty String)**
 
-It scans every folder under the root.
+When you omit the `-MaxDepth` parameter or pass an empty string (`-MaxDepth ""`), it scans every folder under the root.
 
 ------------------------------------------------------------------------
 
 ## ⚙️ Requirements
 
 -   Windows 10/11 or Windows Server\
--   PowerShell 5+\
+-   PowerShell 5.1+ (Windows PowerShell) or PowerShell 7+ (PowerShell Core)\
 -   Read access to target folders\
--   Share-permission retrieval requires remote CIM access if scanning
-    UNC paths
+-   Share-permission retrieval requires remote CIM access if scanning UNC paths\
+-   SMB share access for share permission collection
 
 ------------------------------------------------------------------------
 
@@ -154,12 +178,13 @@ perms and metadata GUI never shows**.
 
 ## 📝 Logging & Error Handling
 
--   Full transcript written to the log file you specify\
+-   Full transcript written to the log file you specify (auto-generated if not provided)\
 -   Any unreadable folders produce entries in:\
-    **`<csvfilename>.errors.csv`**
+    **`<csvfilename>.errors.csv`**\
+-   Progress indicators show current folder being processed\
+-   Summary statistics displayed at completion (total ACE rows, errors encountered)
 
-The audit **never stops** due to permission failures --- it logs and
-continues.
+The audit **never stops** due to permission failures --- it logs and continues.
 
 ------------------------------------------------------------------------
 
@@ -169,9 +194,38 @@ Free to use, modify, and integrate into your environment.
 
 ------------------------------------------------------------------------
 
-If you want a version with: - Effective permissions\
-- Group nesting expansion\
-- Risk scoring\
-- Or HTML/Excel formatted reports
+## 📋 Parameters
 
-...I can generate those too.
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `-RootPath` | Prompted if omitted | - | Root path to audit (UNC or local path) |
+| `-MaxDepth` | Prompted if omitted | `""` (unlimited) | Maximum folder depth to scan (0 = root only) |
+| `-OutputCsvPath` | No | Auto-generated | Path to output CSV file |
+| `-LogFilePath` | No | Auto-generated | Path to log file |
+
+**Note**: If `-RootPath` or `-MaxDepth` are not provided, the script will interactively prompt for them.
+
+## 🔧 Advanced Usage
+
+### **Local Path Example**
+
+``` powershell
+.\FolderAclAudit.ps1 -RootPath "C:\Data" -MaxDepth "1"
+```
+
+### **DFS Namespace Example**
+
+``` powershell
+.\FolderAclAudit.ps1 -RootPath "\\Domain\DFS\Namespace\Folder" -MaxDepth "3"
+```
+
+The script automatically detects and includes share information when available.
+
+---
+
+## 💡 Tips
+
+-   For large directory trees, start with `-MaxDepth "1"` to test performance\
+-   Output files are auto-named with timestamps if not specified\
+-   CSV files use UTF-8 encoding for international character support\
+-   Error CSV files are created only if errors occur during scanning

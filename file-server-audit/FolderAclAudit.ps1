@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory = $true,
+    [Parameter(Mandatory = $false,
                HelpMessage = "Root path to audit (e.g. \\fileserver\\share or C:\\Data)")]
     [string]$RootPath,
 
@@ -11,10 +11,47 @@ param(
                HelpMessage = "Path to log file")]
     [string]$LogFilePath = $(Join-Path -Path (Get-Location) -ChildPath ("FolderAclAudit_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date))),
 
-    [Parameter(Mandatory = $true,
-               HelpMessage = "Max depth: 0=root only, 1=root+children, 2=root+children+grandchildren, etc. Press ENTER for unlimited.")]
-    [string]$MaxDepth
+    [Parameter(Mandatory = $false,
+               HelpMessage = "Max depth: 0=root only, 1=root+children, 2=root+children+grandchildren, etc. Leave empty or omit for unlimited.")]
+    [string]$MaxDepth = ""
 )
+
+# --- Interactive prompts for required parameters if not provided ---
+
+if ([string]::IsNullOrWhiteSpace($RootPath)) {
+    Write-Host ""
+    Write-Host "=== Folder ACL Audit Script ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Please provide the required information:" -ForegroundColor Yellow
+    Write-Host ""
+    $RootPath = Read-Host "Enter root path to audit (e.g. \\fileserver\share or C:\Data)"
+    
+    if ([string]::IsNullOrWhiteSpace($RootPath)) {
+        Write-Error "Root path is required. Script cannot continue without a valid path."
+        exit 1
+    }
+    
+    Write-Host "Root path set to: $RootPath" -ForegroundColor Green
+}
+
+if ([string]::IsNullOrWhiteSpace($MaxDepth)) {
+    Write-Host ""
+    Write-Host "Max Depth Options:" -ForegroundColor Yellow
+    Write-Host "  - Press ENTER or leave empty for unlimited depth (scans all subfolders)" -ForegroundColor Gray
+    Write-Host "  - Enter '0' to scan root folder only" -ForegroundColor Gray
+    Write-Host "  - Enter '1' to scan root + first level children" -ForegroundColor Gray
+    Write-Host "  - Enter '2' to scan root + children + grandchildren" -ForegroundColor Gray
+    Write-Host "  - Enter any positive number for specific depth limit" -ForegroundColor Gray
+    Write-Host ""
+    $MaxDepth = Read-Host "Enter Max Depth (or press ENTER for unlimited)"
+    
+    if ([string]::IsNullOrWhiteSpace($MaxDepth)) {
+        Write-Host "Max depth set to: Unlimited (all subfolders)" -ForegroundColor Green
+    } else {
+        Write-Host "Max depth set to: $MaxDepth" -ForegroundColor Green
+    }
+    Write-Host ""
+}
 
 # --- Normalize & validate MaxDepth ---
 
@@ -291,7 +328,7 @@ Write-Log "Enumerating and auditing folders under '$RootPath' with MaxDepth = $m
 # Process root folder
 try {
     $rootItem = Get-Item -LiteralPath $RootPath -ErrorAction Stop
-    if (-not $rootItem.PSIsContainer) {
+    if (-not ($rootItem -is [System.IO.DirectoryInfo])) {
         Write-Error "Root path '$RootPath' is not a folder."
         exit 1
     }
